@@ -1,0 +1,12 @@
+weights:
+  alpha: 0.7  # Semantic Similarity Weight
+  beta: 0.2   # Missing Skill Penalty Weight
+  gamma: 0.1  # Experience Gap Penalty Weight
+
+models:
+  t5_name: "t5-small"
+  bert_name: "bert-base-uncased"
+
+generation:
+  max_length: 300
+  num_beams: 4

@@ -1,0 +1,12 @@
+protobuf
+streamlit
+pyyaml
+torch
+transformers
+scikit-learn
+pandas
+numpy
+tqdm
+datasets
+pyarrow
+kagglehub
