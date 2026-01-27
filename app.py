@@ -155,6 +155,16 @@ with st.sidebar:
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     
     st.caption("Required skill levels for current open positions")
+    
+    st.markdown("---")
+    
+    # Novel Feature Toggles
+    st.markdown("### 🔬 Research Features")
+    show_hri = st.checkbox("Show HRI Score", value=HRI_ENABLED and "hri" in novel_modules)
+    show_drift = st.checkbox("Show Drift Detection", value=DRIFT_ENABLED and "drift" in novel_modules)
+    show_stability = st.checkbox("Show Rank Stability", value=SENSITIVITY_ENABLED and "sensitivity" in novel_modules)
+    use_srw = st.checkbox("Use Skill Rarity Weighting", value=SRW_ENABLED and "srw" in novel_modules)
+
 
 # --- Main Interface ---
 # State Management
