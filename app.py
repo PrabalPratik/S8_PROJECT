@@ -286,14 +286,9 @@ with tab2:
     if not st.session_state["jd_text"]:
         st.info("ℹ️ To begin candidate evaluation, generate a position description first using the Position Builder tab.")
     
-    # Upload Section
-    uploaded_files = st.file_uploader("Upload Resumes (PDF/DOCX)", accept_multiple_files=True)
-    
     if st.button("Generate Initial Rankings", type="primary", use_container_width=True):
         if not st.session_state["jd_text"]:
             st.error("Please generate a JD first.")
-        elif not uploaded_files:
-            st.error("Please upload resumes.")
         else:
             with st.spinner("Analyzing candidates via BERT..."):
                 try:
