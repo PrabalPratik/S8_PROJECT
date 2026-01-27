@@ -59,7 +59,7 @@ def main():
         res_text = f"Skills: {skills_res}. Experience: {exp} years. Education: {edu}."
         
         # Use hybrid score (BERT + Skill Penalty)
-        score = ranker.get_hybrid_score(res_text, jd_text, required_skills=skills)
+        score, _ = ranker.get_research_score(res_text, jd_text, mandatory_skills=skills)
         results.append({
             "Name": row.get("Name", f"Candidate {idx}"), 
             "Score": score, 

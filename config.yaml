@@ -10,3 +10,28 @@ models:
 generation:
   max_length: 300
   num_beams: 4
+
+# Novel Feature Configuration (Research-Driven Enhancements)
+features:
+  # F1: Constraint Coverage Graph
+  ccg_enabled: true
+  
+  # F2: Hallucination Risk Index
+  hri_enabled: true
+  hri_threshold: 0.3  # Warn if HRI > threshold
+  
+  # F3: Candidate Sensitivity Simulation
+  sensitivity_enabled: true
+  sensitivity_simulations: 50  # Number of Monte-Carlo iterations
+  
+  # F4: Role Drift Detector
+  drift_enabled: true
+  drift_threshold: 0.4  # Warn if drift > threshold
+  
+  # F5: Skill Rarity Weighting
+  srw_enabled: true
+
+# Data paths
+data:
+  skill_corpus: "data/job_skills.csv"
+  resumes: "data/resumes.csv"
