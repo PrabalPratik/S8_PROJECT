@@ -1,0 +1,211 @@
+/* Enterprise SaaS Design System */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* GLOBAL RESETS */
+.stApp {
+    font-family: 'Inter', sans-serif !important;
+    background-color: #F8FAFC !important;
+    /* Slate-50 */
+    color: #1E293B !important;
+    /* Slate-800 */
+}
+
+/* TYPOGRAPHY */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    color: #1E293B !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.01em !important;
+}
+
+p,
+label,
+span,
+div {
+    color: #475569;
+    /* Slate-600 */
+}
+
+/* SIDEBAR */
+[data-testid="stSidebar"] {
+    background-color: #FFFFFF !important;
+    border-right: 1px solid #E2E8F0;
+    /* Slate-200 */
+}
+
+/* METRICS / CARDS */
+[data-testid="stMetric"] {
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    padding: 1.5rem;
+    border-radius: 12px !important;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    transition: transform 0.2s;
+}
+
+[data-testid="stMetric"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+}
+
+[data-testid="stMetricLabel"] {
+    font-weight: 500 !important;
+    font-size: 0.875rem !important;
+    color: #64748B !important;
+    /* Slate-500 */
+}
+
+[data-testid="stMetricValue"] {
+    font-weight: 700 !important;
+    color: #0F172A !important;
+    /* Slate-900 */
+    font-size: 2.25rem !important;
+}
+
+/* BUTTONS */
+.stButton>button {
+    background-color: #334155 !important;
+    /* Slate-700 */
+    color: #FFFFFF !important;
+    border: 1px solid #1E293B !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    padding: 0.6rem 1.2rem !important;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important;
+    transition: all 0.2s ease !important;
+}
+
+.stButton>button:hover {
+    background-color: #1E293B !important;
+    /* Slate-800 */
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+}
+
+.stButton>button:active {
+    background-color: #0F172A !important;
+    transform: translateY(1px);
+}
+
+/* Secondary Buttons (Outlined) */
+button[kind="secondary"] {
+    background-color: #FFFFFF !important;
+    color: #334155 !important;
+    border: 1px solid #E2E8F0 !important;
+}
+
+/* INPUTS */
+.stTextInput>div>div>input,
+.stTextArea>div>div>textarea,
+.stSelectbox>div>div>div {
+    background-color: #FFFFFF !important;
+    border: 1px solid #CBD5E1 !important;
+    /* Slate-300 */
+    border-radius: 8px !important;
+    color: #1E293B !important;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important;
+    font-weight: 400;
+}
+
+.stTextInput>div>div>input:focus,
+.stTextArea>div>div>textarea:focus {
+    border-color: #334155 !important;
+    box-shadow: 0 0 0 2px rgba(51, 65, 85, 0.1) !important;
+}
+
+/* TABS */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0.5rem;
+    border-bottom: 1px solid #E2E8F0;
+    padding-bottom: 0px;
+    background-color: transparent;
+}
+
+.stTabs [data-baseweb="tab"] {
+    border: none;
+    background-color: #F1F5F9;
+    /* Slate-100 */
+    color: #64748B;
+    font-weight: 600;
+    padding: 0.5rem 1.5rem;
+    border-radius: 8px 8px 0 0;
+    margin-right: 4px;
+    transition: all 0.2s;
+}
+
+.stTabs [aria-selected="true"] {
+    background-color: #E2E8F0 !important;
+    /* Slate-200 */
+    color: #0F172A !important;
+    box-shadow: inset 0 -2px 0 0 #334155;
+    /* Active indicator bottom */
+}
+
+/* ALERTS / INFO BOXES */
+.stAlert {
+    background-color: #FFFFFF !important;
+    border: 1px solid #E2E8F0 !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+/* DATAFRAME */
+[data-testid="stDataFrame"] {
+    border: 1px solid #E2E8F0 !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+/* Custom Header Container */
+.enterprise-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 0;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid #E2E8F0;
+    background: transparent;
+}
+
+.header-title-group h1 {
+    font-size: 1.8rem !important;
+    margin: 0;
+    color: #0F172A !important;
+    line-height: 1.2;
+}
+
+.header-subtitle {
+    color: #64748B;
+    font-size: 0.95rem;
+    font-weight: 400;
+    margin-top: 0.25rem;
+}
+
+.enterprise-badge {
+    background-color: #334155;
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    letter-spacing: 0.02em;
+    box-shadow: 0 4px 6px -1px rgba(51, 65, 85, 0.2);
+}
+
+/* Sidebar Customization */
+[data-testid="stSidebar"] h1 {
+    font-size: 1.25rem !important;
+    color: #0F172A !important;
+}
+
+/* Card Container for Analytics */
+.kpi-card {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 12px;
+    border: 1px solid #E2E8F0;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+}
