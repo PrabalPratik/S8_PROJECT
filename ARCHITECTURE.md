@@ -4,11 +4,12 @@
 1. [Project Overview](#project-overview)
 2. [System Architecture](#system-architecture)
 3. [Component Details](#component-details)
-4. [Data Flow](#data-flow)
-5. [Technical Implementation](#technical-implementation)
-6. [Configuration & Scoring Physics](#configuration--scoring-physics)
-7. [User Interfaces](#user-interfaces)
-8. [File Structure](#file-structure)
+4. [Novel Research Features](#novel-research-features)
+5. [Data Flow](#data-flow)
+6. [Technical Implementation](#technical-implementation)
+7. [Configuration & Scoring Physics](#configuration--scoring-physics)
+8. [User Interfaces](#user-interfaces)
+9. [File Structure](#file-structure)
 
 ---
 
@@ -386,7 +387,203 @@ def __getitem__(self, idx):
 
 ---
 
-## 🔄 Data Flow
+## � Novel Research Features
+
+This framework includes 5 research-driven features that fill gaps in the AI recruiting literature.
+
+### Feature 1: Constraint Coverage Graph (CCG)
+
+**File:** `models/constraint_graph.py`
+
+**Problem:** Traditional skill matching uses flat keyword comparison, missing semantic relationships between skills.
+
+**Solution:** Build a graph where nodes are skills and edges represent co-occurrence in job descriptions.
+
+```python
+# Skills that frequently appear together get connected
+"Python" ←→ "Django" (weight: 0.85)
+"Python" ←→ "Machine Learning" (weight: 0.72)
+"AWS" ←→ "Kubernetes" (weight: 0.68)
+```
+
+**Scoring Algorithm:**
+```
+Coverage = Direct_Match × 0.6 + Indirect_Match × 0.2 + Cluster_Bonus + Centrality_Bonus
+```
+
+| Component | Description |
+|-----------|-------------|
+| **Direct Match** | Skills candidate has that JD requires |
+| **Indirect Match** | Related skills (via graph) that compensate for missing ones |
+| **Cluster Bonus** | Extra credit for having role-typical skill clusters |
+| **Centrality Bonus** | Reward for high-connectivity (important) skills |
+
+**Example:**
+```
+Required: [Python, TensorFlow, Deep Learning]
+Candidate: [Python, PyTorch, ML]
+
+Direct Coverage: 33% (only Python)
+Indirect Coverage: +15% (PyTorch is adjacent to TensorFlow in graph)
+Final Score: 48% (vs. 33% with flat matching)
+```
+
+---
+
+### Feature 2: Hallucination Risk Index (HRI)
+
+**File:** `utils/hallucination_detector.py`
+
+**Problem:** LLMs can "hallucinate" non-existent technologies or skills in generated JDs.
+
+**Solution:** Compare generated skills against a validated taxonomy built from the training corpus.
+
+**HRI Calculation:**
+```
+HRI = Unknown_Ratio × 0.5 + Rare_Ratio × 0.2 + Missing_Required × 0.3
+```
+
+| Risk Level | HRI Score | Interpretation |
+|------------|-----------|----------------|
+| 🟢 Low | < 0.2 | All skills recognized |
+| 🟡 Moderate | 0.2 - 0.4 | Some uncommon terms |
+| 🟠 Elevated | 0.4 - 0.6 | Review recommended |
+| 🔴 High | > 0.6 | Likely hallucinations present |
+
+**Example Detection:**
+```
+Generated JD mentions: "QuantumML", "HyperDataSync"
+Taxonomy check: ❌ Not found
+HRI Flag: Potential hallucinations detected
+```
+
+---
+
+### Feature 3: Candidate Sensitivity Simulation
+
+**File:** `utils/sensitivity_analysis.py`
+
+**Problem:** Small changes in scoring weights (α, β, γ) can dramatically change rankings, making AI decisions fragile.
+
+**Solution:** Monte-Carlo simulation to quantify rank stability.
+
+**Algorithm:**
+```python
+for simulation in range(N_SIMULATIONS):
+    α' = α + Gaussian_Noise(σ=0.15)
+    β' = β + Gaussian_Noise(σ=0.15)
+    γ' = γ + Gaussian_Noise(σ=0.15)
+    
+    new_rankings = score_and_rank(candidates, α', β', γ')
+    track_rank_changes(new_rankings)
+
+stability = count_unchanged_ranks / N_SIMULATIONS × 100
+```
+
+**Output:**
+```
+Candidate A: 95% stable (rank rarely changes)
+Candidate B: 45% stable (rank is sensitive to weights)
+Candidate C: 80% stable (mostly consistent)
+```
+
+**Why This Matters:**
+- Defensible AI hiring decisions
+- Identifies borderline candidates needing human review
+- Builds trust in automated rankings
+
+---
+
+### Feature 4: Role Drift Detector
+
+**File:** `models/drift_detector.py`
+
+**Problem:** Generated JDs may semantically drift from the intended role (e.g., "Data Scientist" → "Data Engineer" language).
+
+**Solution:** Encode role and JD separately, measure cosine similarity.
+
+**Detection Process:**
+```
+Role: "Data Scientist"
+     ↓ Encode
+Role Embedding (384-dim vector)
+
+Generated JD: "Build ETL pipelines, manage data warehouse..."
+     ↓ Encode
+JD Embedding (384-dim vector)
+
+Drift = 1 - Cosine_Similarity(Role_Emb, JD_Emb)
+```
+
+**Drift Levels:**
+| Level | Score | Action |
+|-------|-------|--------|
+| 🟢 Aligned | < 0.2 | Good to go |
+| 🟡 Minor Drift | 0.2 - 0.4 | Review |
+| 🟠 Moderate Drift | 0.4 - 0.6 | Consider regeneration |
+| 🔴 Significant Drift | > 0.6 | Regenerate JD |
+
+**Contamination Detection:**
+```
+Warning: JD for "Data Scientist" shows drift towards "Data Engineer"
+Keywords detected: pipeline, ETL, warehouse (not typical for DS role)
+```
+
+---
+
+### Feature 5: Skill Rarity Weighting (SRW)
+
+**File:** `utils/skill_rarity.py`
+
+**Problem:** All missing skills are penalized equally, but rare skills should matter more than common ones.
+
+**Solution:** Apply IDF-based weights to skill penalties.
+
+**Weight Calculation:**
+```
+IDF(skill) = log(Total_Jobs / Jobs_With_Skill)
+Rarity_Weight = IDF(skill) / Max_IDF
+```
+
+**Example Weights:**
+| Skill | Frequency | Rarity Weight | Category |
+|-------|-----------|---------------|----------|
+| Python | 45% of jobs | 0.14 | 🟢 Common |
+| Kubernetes | 8% of jobs | 0.65 | 🟠 Rare |
+| Terraform | 3% of jobs | 0.88 | 🔴 Very Rare |
+
+**Impact on Scoring:**
+```
+Without SRW: Missing Python = Missing Kubernetes = 0.33 penalty each
+With SRW: Missing Python = 0.14 penalty, Missing Kubernetes = 0.65 penalty
+
+Rare skills matter more!
+```
+
+**Integration with BertRanker:**
+```python
+score, details = ranker.get_research_score(
+    resume_text, jd_text,
+    mandatory_skills="Python, Kubernetes, Terraform",
+    skill_rarity_weights={"python": 0.14, "kubernetes": 0.65, "terraform": 0.88}
+)
+```
+
+---
+
+### Feature Summary
+
+| Feature | Purpose | Key Benefit |
+|---------|---------|-------------|
+| **CCG** | Graph-based skill coverage | Captures skill relationships |
+| **HRI** | Hallucination detection | Validates generated content |
+| **Sensitivity** | Rank stability analysis | Defensible decisions |
+| **Drift** | Role alignment checking | Prevents JD contamination |
+| **SRW** | Rarity-weighted penalties | Fair specialized role matching |
+
+---
+
+## �🔄 Data Flow
 
 ### Complete Pipeline Walkthrough
 
@@ -496,6 +693,21 @@ models:
 generation:
   max_length: 300
   num_beams: 4
+
+# Novel Feature Configuration
+features:
+  ccg_enabled: true           # Constraint Coverage Graph
+  hri_enabled: true           # Hallucination Risk Index
+  hri_threshold: 0.3          # Warn if HRI > threshold
+  sensitivity_enabled: true   # Monte-Carlo Rank Stability
+  sensitivity_simulations: 50 # Number of simulations
+  drift_enabled: true         # Role Drift Detection
+  drift_threshold: 0.4        # Warn if drift > threshold
+  srw_enabled: true           # Skill Rarity Weighting
+
+data:
+  skill_corpus: "data/job_skills.csv"
+  resumes: "data/resumes.csv"
 ```
 
 ### Weight Tuning Guide
@@ -689,7 +901,9 @@ bert_t5_jd_framework/
 ├── 📁 models/                      # Core AI components
 │   ├── 📄 t5_generator.py         # T5 job description generator
 │   ├── 📄 bert_ranker.py          # BERT resume ranker
-│   └── 📄 attention_utils.py      # Explainability utilities
+│   ├── 📄 attention_utils.py      # Explainability utilities
+│   ├── 📄 constraint_graph.py     # F1: Constraint Coverage Graph
+│   └── 📄 drift_detector.py       # F4: Role Drift Detector
 │
 ├── 📁 data/                        # Dataset management
 │   ├── 📄 dataset_loader.py       # PyTorch Dataset classes
@@ -698,9 +912,12 @@ bert_t5_jd_framework/
 │   └── 📄 job_skills.csv          # Skills taxonomy
 │
 ├── 📁 utils/                       # Helper functions
-│   └── 📄 metrics.py              # Adherence & CVM calculations
+│   ├── 📄 metrics.py              # Adherence & CVM calculations
+│   ├── 📄 hallucination_detector.py # F2: HRI detection
+│   ├── � sensitivity_analysis.py  # F3: Monte-Carlo stability
+│   └── 📄 skill_rarity.py         # F5: Skill Rarity Weighting
 │
-├── 📁 .streamlit/                  # Streamlit configuration
+├── �📁 .streamlit/                  # Streamlit configuration
 │   └── 📄 config.toml             # Theme & server settings
 │
 └── 📁 scripts/                     # Training & testing
@@ -832,5 +1049,5 @@ scores = ranker.batch_predict(resumes, jd)
 ---
 
 **Last Updated:** January 2026  
-**Version:** 2.0  
+**Version:** 3.0  
 **Maintainer:** TalentAI Research Team
