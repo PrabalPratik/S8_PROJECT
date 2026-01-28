@@ -17,6 +17,9 @@ try:
     from models.drift_detector import RoleDriftDetector
     from utils.sensitivity_analysis import SensitivityAnalyzer
     from utils.skill_rarity import SkillRarityCalculator
+    from utils.fairness_auditor import FairnessAuditor, generate_synthetic_demographics
+    from models.constraint_graph import ConstraintCoverageGraph
+    from utils.feedback_logger import get_feedback_logger
     NOVEL_FEATURES_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Some novel features unavailable: {e}")
@@ -57,6 +60,8 @@ SRW_ENABLED = features.get("srw_enabled", False)
 HRI_THRESHOLD = features.get("hri_threshold", 0.3)
 DRIFT_THRESHOLD = features.get("drift_threshold", 0.4)
 SENSITIVITY_SIMS = features.get("sensitivity_simulations", 50)
+FAIRNESS_ENABLED = features.get("fairness_enabled", False)
+FAIRNESS_THRESHOLD = features.get("fairness_threshold", 0.8)
 
 # --- Model Loading ---
 @st.cache_resource
@@ -74,6 +79,13 @@ def load_novel_features():
         if HRI_ENABLED:
             try:
                 modules["hri"] = HallucinationDetector(skill_corpus)
+                # Link to CCG for correction suggestions
+                try:
+                    ccg = ConstraintCoverageGraph(skill_corpus)
+                    modules["hri"].set_correction_graph(ccg)
+                    modules["ccg"] = ccg
+                except Exception as ccg_e:
+                    print(f"CCG linking failed: {ccg_e}")
             except Exception as e:
                 print(f"HRI init failed: {e}")
         if DRIFT_ENABLED:
@@ -88,6 +100,11 @@ def load_novel_features():
                 modules["srw"] = SkillRarityCalculator(skill_corpus)
             except Exception as e:
                 print(f"SRW init failed: {e}")
+        if FAIRNESS_ENABLED:
+            try:
+                modules["fairness"] = FairnessAuditor(dir_threshold=FAIRNESS_THRESHOLD)
+            except Exception as e:
+                print(f"Fairness auditor init failed: {e}")
     return modules
 
 with st.spinner("Initializing Research Engine..."):
@@ -271,6 +288,69 @@ with tab1:
                             if contaminated:
                                 st.warning(f"⚠️ JD may drift towards: {contaminated.title()}")
                 
+                # HRI Correction Suggestions
+                hri_details = st.session_state.get("hri_details", {})
+                corrections = hri_details.get("corrections", {})
+                if corrections:
+                    st.divider()
+                    st.markdown("**🛠️ Suggested Corrections:**")
+                    for unknown, suggestions in corrections.items():
+                        suggestion_text = ", ".join([f"{s[0]} ({s[1]:.0%})" for s in suggestions])
+                        st.caption(f"• Replace *{unknown}* with: {suggestion_text}")
+                    
+                    if st.button("✅ Apply All Corrections", key="apply_corrections"):
+                        if "hri" in novel_modules:
+                            corrected_jd = novel_modules["hri"].apply_corrections(
+                                st.session_state["jd_text"], corrections
+                            )
+                            st.session_state["jd_text"] = corrected_jd
+                            # Re-run HRI on corrected text
+                            hri_score, hri_details = novel_modules["hri"].calculate_hri(
+                                corrected_jd, st.session_state.get("mandatory", "").split(",")
+                            )
+                            st.session_state["hri_score"] = hri_score
+                            st.session_state["hri_details"] = hri_details
+                            st.rerun()
+                
+                # Human Feedback Section
+                st.divider()
+                st.markdown("**📝 Rate this JD:**")
+                fb_col1, fb_col2, fb_col3 = st.columns([1, 1, 2])
+                
+                with fb_col1:
+                    if st.button("👍 Good", key="jd_thumbs_up", use_container_width=True):
+                        try:
+                            logger = get_feedback_logger()
+                            logger.log_feedback(
+                                "jd_quality", 1,
+                                {
+                                    "role": st.session_state.get("generated_role", ""),
+                                    "skills": st.session_state.get("mandatory", ""),
+                                    "hri_score": st.session_state.get("hri_score", ""),
+                                    "drift_score": st.session_state.get("drift_score", "")
+                                }
+                            )
+                            st.success("Thanks for feedback!")
+                        except Exception:
+                            st.success("Feedback noted!")
+                
+                with fb_col2:
+                    if st.button("👎 Needs Work", key="jd_thumbs_down", use_container_width=True):
+                        try:
+                            logger = get_feedback_logger()
+                            logger.log_feedback(
+                                "jd_quality", -1,
+                                {
+                                    "role": st.session_state.get("generated_role", ""),
+                                    "skills": st.session_state.get("mandatory", ""),
+                                    "hri_score": st.session_state.get("hri_score", ""),
+                                    "drift_score": st.session_state.get("drift_score", "")
+                                }
+                            )
+                            st.warning("Thanks! We'll improve.")
+                        except Exception:
+                            st.warning("Feedback noted!")
+                
             else:
                 st.info("Fill in the form and click Generate to see the job description preview")
                 st.caption("Waiting for input...")
@@ -333,6 +413,35 @@ with tab2:
                         },
                         use_container_width=True, hide_index=True
                     )
+                    
+                    # Feedback for rankings
+                    st.divider()
+                    st.markdown("**📝 Rate these rankings:**")
+                    rank_fb1, rank_fb2, _ = st.columns([1, 1, 2])
+                    
+                    with rank_fb1:
+                        if st.button("👍 Accurate", key="rank_thumbs_up", use_container_width=True):
+                            try:
+                                logger = get_feedback_logger()
+                                logger.log_feedback(
+                                    "ranking_accuracy", 1,
+                                    {"role": st.session_state.get("generated_role", "")}
+                                )
+                                st.success("Thanks!")
+                            except Exception:
+                                st.success("Noted!")
+                    
+                    with rank_fb2:
+                        if st.button("👎 Inaccurate", key="rank_thumbs_down", use_container_width=True):
+                            try:
+                                logger = get_feedback_logger()
+                                logger.log_feedback(
+                                    "ranking_accuracy", -1,
+                                    {"role": st.session_state.get("generated_role", "")}
+                                )
+                                st.warning("We'll improve!")
+                            except Exception:
+                                st.warning("Noted!")
                     
                 except Exception as e:
                     st.error(f"Analysis failed: {e}")
@@ -400,3 +509,45 @@ with tab3:
                          color_discrete_sequence=['#0F766E']) # Teal
         fig_bar.update_layout(plot_bgcolor='white', paper_bgcolor='white')
         st.plotly_chart(fig_bar, use_container_width=True)
+    
+    # --- Fairness Metrics Section ---
+    if "fairness" in novel_modules and st.session_state.get("results_df") is not None:
+        st.markdown("---")
+        st.subheader("⚖️ Fairness Audit")
+        st.caption("Demographic parity and exposure analysis for current rankings")
+        
+        results_df = st.session_state["results_df"]
+        
+        # Generate synthetic demographics for demo
+        demographics_df = generate_synthetic_demographics(results_df["Candidate"].tolist())
+        
+        # Run audit
+        auditor = novel_modules["fairness"]
+        report = auditor.audit(results_df, demographics_df, ["Gender", "Age_Group"], top_k=3)
+        
+        # Display metrics
+        fair_col1, fair_col2, fair_col3 = st.columns(3)
+        
+        with fair_col1:
+            overall_status = report["summary"]["overall_status"]
+            st.metric("Overall Status", overall_status)
+        
+        with fair_col2:
+            if "Gender" in report["by_attribute"]:
+                gender_dir = report["by_attribute"]["Gender"]["dir"]["dir_score"]
+                st.metric("Gender DIR", f"{gender_dir:.1%}", 
+                         delta="Compliant" if gender_dir >= FAIRNESS_THRESHOLD else "Below 80%",
+                         delta_color="normal" if gender_dir >= FAIRNESS_THRESHOLD else "inverse")
+        
+        with fair_col3:
+            if "Age_Group" in report["by_attribute"]:
+                age_dir = report["by_attribute"]["Age_Group"]["dir"]["dir_score"]
+                st.metric("Age Group DIR", f"{age_dir:.1%}",
+                         delta="Compliant" if age_dir >= FAIRNESS_THRESHOLD else "Below 80%",
+                         delta_color="normal" if age_dir >= FAIRNESS_THRESHOLD else "inverse")
+        
+        # Recommendations
+        if report["recommendations"]:
+            with st.expander("📌 Recommendations", expanded=False):
+                for rec in report["recommendations"]:
+                    st.warning(rec)

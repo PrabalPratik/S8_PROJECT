@@ -30,6 +30,10 @@ features:
   
   # F5: Skill Rarity Weighting
   srw_enabled: true
+  
+  # F6: Fairness Auditor
+  fairness_enabled: true
+  fairness_threshold: 0.8  # DIR threshold (80% rule)
 
 # Data paths
 data:

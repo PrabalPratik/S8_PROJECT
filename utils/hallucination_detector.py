@@ -230,10 +230,103 @@ class HallucinationDetector:
             "missing_required": missing_required,
             "unknown_ratio": unknown_ratio,
             "rare_ratio": rare_ratio,
-            "missing_required_penalty": missing_required_penalty
+            "missing_required_penalty": missing_required_penalty,
+            "corrections": {}  # Will be populated if correction graph is set
         }
         
+        # Generate corrections if graph is available
+        if hasattr(self, 'correction_graph') and self.correction_graph is not None:
+            corrections = self.suggest_corrections(unknown_skills)
+            details["corrections"] = corrections
+        
         return hri, details
+    
+    def set_correction_graph(self, ccg) -> None:
+        """
+        Link a ConstraintCoverageGraph for correction suggestions.
+        
+        Args:
+            ccg: Initialized ConstraintCoverageGraph instance
+        """
+        self.correction_graph = ccg
+    
+    def suggest_corrections(self, unknown_skills: List[str]) -> Dict[str, List[Tuple[str, float]]]:
+        """
+        Suggest valid skill replacements for unknown/hallucinated skills.
+        
+        Uses the ConstraintCoverageGraph to find semantically similar valid skills.
+        
+        Args:
+            unknown_skills: List of skills not found in taxonomy
+            
+        Returns:
+            Dict mapping unknown skill to list of (suggested_skill, similarity_score) tuples
+        """
+        if not hasattr(self, 'correction_graph') or self.correction_graph is None:
+            return {}
+        
+        corrections = {}
+        
+        for unknown in unknown_skills:
+            unknown_lower = unknown.lower().strip()
+            suggestions = []
+            
+            # Strategy 1: Find similar skills by substring matching
+            for known_skill in self.skill_taxonomy:
+                # Check if unknown is a substring or vice versa
+                if unknown_lower in known_skill or known_skill in unknown_lower:
+                    suggestions.append((known_skill, 0.8))
+                # Check for word overlap
+                elif set(unknown_lower.split()) & set(known_skill.split()):
+                    suggestions.append((known_skill, 0.6))
+            
+            # Strategy 2: Use graph neighbors if we have partial matches
+            if not suggestions and self.correction_graph:
+                # Try to find skills that commonly co-occur with the context
+                for known_skill in list(self.skill_taxonomy)[:100]:  # Sample for efficiency
+                    neighbors = self.correction_graph.get_neighbors(known_skill, top_k=5)
+                    for neighbor, weight in neighbors:
+                        if neighbor in self.skill_taxonomy:
+                            suggestions.append((neighbor, weight / 100))  # Normalize
+            
+            # Deduplicate and sort by score
+            seen = set()
+            unique_suggestions = []
+            for skill, score in sorted(suggestions, key=lambda x: -x[1]):
+                if skill not in seen:
+                    seen.add(skill)
+                    unique_suggestions.append((skill, round(score, 2)))
+                    if len(unique_suggestions) >= 3:
+                        break
+            
+            if unique_suggestions:
+                corrections[unknown] = unique_suggestions
+        
+        return corrections
+    
+    def apply_corrections(self, text: str, corrections: Dict[str, List[Tuple[str, float]]]) -> str:
+        """
+        Apply suggested corrections to text.
+        
+        Replaces unknown skills with the top suggestion.
+        
+        Args:
+            text: Original text containing hallucinated skills
+            corrections: Dict of corrections from suggest_corrections()
+            
+        Returns:
+            Corrected text
+        """
+        corrected = text
+        for unknown, suggestions in corrections.items():
+            if suggestions:
+                top_suggestion = suggestions[0][0]
+                # Case-insensitive replacement
+                import re
+                pattern = re.compile(re.escape(unknown), re.IGNORECASE)
+                corrected = pattern.sub(top_suggestion, corrected)
+        
+        return corrected
     
     def get_skill_confidence(self, skill: str) -> Tuple[float, str]:
         """
@@ -273,6 +366,10 @@ class HallucinationDetector:
             report += f"\n⚠️ Potentially Hallucinated Skills:\n"
             for skill in details['unknown_skills'][:5]:
                 report += f"   • {skill}\n"
+                # Show corrections if available
+                if details.get('corrections', {}).get(skill):
+                    suggestions = details['corrections'][skill]
+                    report += f"     → Suggested: {', '.join([s[0] for s in suggestions])}\n"
         
         if details.get('missing_required'):
             report += f"\n❌ Missing Required Skills:\n"
