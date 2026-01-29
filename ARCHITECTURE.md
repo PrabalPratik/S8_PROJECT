@@ -576,14 +576,178 @@ score, details = ranker.get_research_score(
 | Feature | Purpose | Key Benefit |
 |---------|---------|-------------|
 | **CCG** | Graph-based skill coverage | Captures skill relationships |
-| **HRI** | Hallucination detection | Validates generated content |
+| **HRI** | Hallucination detection + correction | Validates generated content |
 | **Sensitivity** | Rank stability analysis | Defensible decisions |
 | **Drift** | Role alignment checking | Prevents JD contamination |
 | **SRW** | Rarity-weighted penalties | Fair specialized role matching |
+| **Fairness Auditor** | Demographic parity & bias detection | Compliant, unbiased rankings |
+| **Feedback Logger** | Human-grounded evaluation | Continuous improvement |
 
 ---
 
-## �🔄 Data Flow
+### Feature 6: Fairness Auditor
+
+**File:** `utils/fairness_auditor.py`
+
+**Problem:** AI ranking systems can inadvertently discriminate against protected demographic groups, violating EEOC guidelines and the 80% rule.
+
+**Solution:** Comprehensive fairness auditing with three key metrics:
+
+**Metrics Implemented:**
+
+| Metric | Formula | Threshold |
+|--------|---------|-----------|
+| **Selection Rate** | (# selected from group) / (# total in group) | Per-group analysis |
+| **Disparate Impact Ratio (DIR)** | min_group_rate / max_group_rate | ≥ 0.8 (80% rule) |
+| **Exposure Parity** | sum(1 / log₂(rank + 1)) per group | Normalized comparison |
+
+**80% Rule Compliance:**
+```
+If DIR < 0.8 → Potential adverse impact detected
+   Example: Group A selection = 40%, Group B selection = 32%
+   DIR = 32% / 40% = 0.80 → ✅ Compliant (borderline)
+   
+   If Group B selection = 28%:
+   DIR = 28% / 40% = 0.70 → ❌ Violation
+```
+
+**Usage:**
+```python
+from utils.fairness_auditor import FairnessAuditor
+
+auditor = FairnessAuditor(dir_threshold=0.8)
+report = auditor.audit(
+    rankings=rankings_df,           # Candidate rankings
+    demographics=demographics_df,    # Protected attributes
+    protected_attrs=["Gender", "Age_Group"],
+    top_k=5                          # Selection cutoff
+)
+print(auditor.format_report(report))
+```
+
+**Output Example:**
+```
+📊 FAIRNESS AUDIT REPORT
+========================
+
+Protected Attribute: Gender
+   Selection Rates: Male=45%, Female=42%, Other=38%
+   Disparate Impact: 0.84 ✅ (passes 80% rule)
+   Exposure Parity: 0.91 ✅
+
+Protected Attribute: Age_Group
+   Selection Rates: 25-34=48%, 35-44=40%, 45+=32%
+   Disparate Impact: 0.67 ❌ (potential adverse impact)
+   Recommendation: Review ranking criteria for age bias
+```
+
+---
+
+### Feature 7: Feedback Logger (Human-Grounded Evaluation)
+
+**File:** `utils/feedback_logger.py`
+
+**Problem:** AI system quality cannot be measured purely by automated metrics; human feedback is essential for production improvement.
+
+**Solution:** Structured feedback collection with thumbs up/down ratings and contextual metadata.
+
+**Feedback Types:**
+
+| Type | Description | Context Captured |
+|------|-------------|------------------|
+| `jd_quality` | Quality of generated JD | Role, skills, HRI score |
+| `ranking_accuracy` | Correctness of candidate rankings | Role, candidate name |
+| `correction_helpful` | Whether HRI corrections were useful | Drift score, corrections applied |
+
+**Usage:**
+```python
+from utils.feedback_logger import get_feedback_logger
+
+logger = get_feedback_logger()
+
+# Log positive feedback on JD generation
+logger.log_feedback(
+    feedback_type="jd_quality",
+    rating=1,  # Thumbs up
+    context={"role": "Data Scientist", "skills": "Python, ML", "hri_score": 0.15}
+)
+
+# Log negative feedback on ranking
+logger.log_feedback(
+    feedback_type="ranking_accuracy",
+    rating=-1,  # Thumbs down
+    context={"role": "Backend Engineer", "candidate": "Alice Chen"},
+    notes="Top candidate lacked required AWS experience"
+)
+
+# Get feedback summary
+summary = logger.get_feedback_summary()
+print(logger.format_summary(summary))
+```
+
+**Summary Output:**
+```
+📊 FEEDBACK SUMMARY
+====================
+Total Feedback: 47
+Overall Satisfaction: 78.7%
+
+📌 jd_quality:
+   👍 25 | 👎 5
+   Satisfaction: 83.3%
+
+📌 ranking_accuracy:
+   👍 12 | 👎 5
+   Satisfaction: 70.6%
+```
+
+**Storage Format:**
+Feedback is persisted to `data/feedback_log.csv` with columns:
+- `timestamp`, `feedback_type`, `rating`, `context_role`, `context_skills`, `context_candidate`, `hri_score`, `drift_score`, `additional_notes`
+
+---
+
+### Feature 2 Enhancement: HRI with Correction Suggestions
+
+**Updated File:** `utils/hallucination_detector.py`
+
+The Hallucination Risk Index now includes **automatic correction suggestions** for detected hallucinations using the Constraint Coverage Graph (CCG).
+
+**New Capabilities:**
+
+1. **Correction Suggestions**: When unknown skills are detected, the system suggests valid replacements based on:
+   - Substring matching with known skills
+   - Word overlap analysis
+   - CCG graph neighbor similarity
+
+2. **Automatic Correction Application**: Apply suggested corrections to generated text
+
+**Usage:**
+```python
+from utils.hallucination_detector import HallucinationDetector
+from models.constraint_graph import ConstraintCoverageGraph
+
+detector = HallucinationDetector("data/job_skills.csv")
+ccg = ConstraintCoverageGraph()
+ccg.build_from_corpus("data/job_corpus.csv")
+
+# Link CCG for correction suggestions
+detector.set_correction_graph(ccg)
+
+# Calculate HRI with corrections
+hri, details = detector.calculate_hri(generated_jd, required_skills=["Python", "AWS"])
+
+# Details now includes corrections
+print(details["corrections"])
+# Output: {"quantumml": [("quantum computing", 0.8), ("machine learning", 0.6)]}
+
+# Apply top corrections
+corrected_jd = detector.apply_corrections(generated_jd, details["corrections"])
+```
+
+---
+
+## 🔄 Data Flow
 
 ### Complete Pipeline Walkthrough
 
@@ -913,11 +1077,13 @@ bert_t5_jd_framework/
 │
 ├── 📁 utils/                       # Helper functions
 │   ├── 📄 metrics.py              # Adherence & CVM calculations
-│   ├── 📄 hallucination_detector.py # F2: HRI detection
-│   ├── � sensitivity_analysis.py  # F3: Monte-Carlo stability
-│   └── 📄 skill_rarity.py         # F5: Skill Rarity Weighting
+│   ├── 📄 hallucination_detector.py # F2: HRI detection + corrections
+│   ├── 📄 sensitivity_analysis.py  # F3: Monte-Carlo stability
+│   ├── 📄 skill_rarity.py         # F5: Skill Rarity Weighting
+│   ├── 📄 fairness_auditor.py     # F6: Demographic parity & bias
+│   └── 📄 feedback_logger.py      # F7: Human-grounded feedback
 │
-├── �📁 .streamlit/                  # Streamlit configuration
+├── 📁 .streamlit/                  # Streamlit configuration
 │   └── 📄 config.toml             # Theme & server settings
 │
 └── 📁 scripts/                     # Training & testing
