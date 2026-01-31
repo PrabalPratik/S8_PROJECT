@@ -20,10 +20,12 @@ try:
     from utils.fairness_auditor import FairnessAuditor, generate_synthetic_demographics
     from models.constraint_graph import ConstraintCoverageGraph
     from utils.feedback_logger import get_feedback_logger
+    from utils.data_persistence import get_data_persistence
     NOVEL_FEATURES_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Some novel features unavailable: {e}")
     NOVEL_FEATURES_AVAILABLE = False
+
 
 # --- Configuration & Setup ---
 st.set_page_config(
@@ -144,37 +146,7 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Radar Chart
-    categories = ['Python', 'SQL', 'AWS', 'System Design', 'Commun.']
-    # Dynamic logic for demo purposes based on sliders
-    values = [70 + (alpha*20), 60 + (beta*30), 50 + (gamma*40), 80, 90] 
-    
-    fig = go.Figure(data=go.Scatterpolar(
-        r=values,
-        theta=categories,
-        fill='toself',
-        name='Ideal Profile',
-        line_color='#334155',
-        fillcolor='rgba(51, 65, 85, 0.2)'
-    ))
-    fig.update_layout(
-        polar=dict(
-            radialaxis=dict(visible=True, range=[0, 100], showticklabels=False, tickfont=dict(size=8)),
-            bgcolor='white'
-        ),
-        showlegend=False,
-        height=250,
-        margin=dict(l=30, r=30, t=10, b=10),
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(family="Inter", size=10, color="#64748B")
-    )
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-    
-    st.caption("Required skill levels for current open positions")
-    
-    st.markdown("---")
-    
+
     # Novel Feature Toggles
     st.markdown("### 🔬 Research Features")
     show_hri = st.checkbox("Show HRI Score", value=HRI_ENABLED and "hri" in novel_modules)
@@ -242,6 +214,25 @@ with tab1:
                         drift_score, drift_details = novel_modules["drift"].detect_drift(role, jd_text, mandatory)
                         st.session_state["drift_score"] = drift_score
                         st.session_state["drift_details"] = drift_details
+                    
+                    # Save JD to persistent storage
+                    try:
+                        dp = get_data_persistence()
+                        dp.save_jd(
+                            role=role,
+                            experience=exp,
+                            mandatory_skills=mandatory,
+                            optional_skills=optional,
+                            jd_text=jd_text,
+                            hri_score=st.session_state.get("hri_score"),
+                            drift_score=st.session_state.get("drift_score")
+                        )
+                    except Exception as e:
+                        print(f"JD persistence failed: {e}")
+                    
+                    # Rerun to refresh UI
+                    st.rerun()
+
 
     with col_preview:
         st.subheader("Generated Preview")
@@ -405,6 +396,17 @@ with tab2:
                     results_df = pd.DataFrame(results).sort_values(by="Global Score", ascending=False)
                     st.session_state["results_df"] = results_df
                     
+                    # Save rankings to persistent storage
+                    try:
+                        dp = get_data_persistence()
+                        dp.save_rankings(
+                            role=st.session_state.get("generated_role", ""),
+                            mandatory_skills=st.session_state.get("mandatory", ""),
+                            rankings_df=results_df
+                        )
+                    except Exception as e:
+                        print(f"Rankings persistence failed: {e}")
+                    
                     # Display Table
                     st.dataframe(
                         results_df,
@@ -413,6 +415,7 @@ with tab2:
                         },
                         use_container_width=True, hide_index=True
                     )
+
                     
                     # Feedback for rankings
                     st.divider()
@@ -448,67 +451,144 @@ with tab2:
 
 # --- TAB 3: ANALYTICS ---
 with tab3:
-    # KPI Cards
+    st.markdown("### 📊 Recruitment Analytics Dashboard")
+    st.caption("Real-time metrics based on your candidate evaluations")
+    
+    # Load actual resume data for base metrics
+    try:
+        resumes_df = pd.read_csv(config.get("data", {}).get("resumes", "data/resumes.csv"))
+        total_applicants = len(resumes_df)
+    except:
+        resumes_df = None
+        total_applicants = 0
+    
+    # Get ranking results from session state
+    results_df = st.session_state.get("results_df", None)
+    
+    # Calculate dynamic metrics
+    if results_df is not None and len(results_df) > 0:
+        qualified_count = len(results_df[results_df["Global Score"] >= 0.2])
+        qualification_rate = (qualified_count / len(results_df) * 100) if len(results_df) > 0 else 0
+        avg_score = results_df["Global Score"].mean()
+        top_score = results_df["Global Score"].max()
+    else:
+        qualified_count = 0
+        qualification_rate = 0
+        avg_score = 0
+        top_score = 0
+    
+    # Track session metrics
+    if "analytics_history" not in st.session_state:
+        st.session_state["analytics_history"] = {
+            "evaluations": [],
+            "jds_generated": 0,
+            "rankings_run": 0
+        }
+    
+    # KPI Cards - Dynamic Data
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("""
+        st.markdown(f"""
         <div class="kpi-card">
             <h3>Total Applicants</h3>
-            <div style="font-size: 2.5rem; font-weight: 700; color: #1E293B;">1,256</div>
-            <div style="color: #10B981; font-weight: 600;">+12% from last period</div>
+            <div style="font-size: 2.5rem; font-weight: 700; color: #1E293B;">{total_applicants}</div>
+            <div style="color: #64748B;">From resumes.csv</div>
         </div>
         """, unsafe_allow_html=True)
         
     with col2:
-        st.markdown("""
+        st.markdown(f"""
         <div class="kpi-card">
             <h3>Qualified Candidates</h3>
-            <div style="font-size: 2.5rem; font-weight: 700; color: #1E293B;">847</div>
-            <div style="color: #64748B;">67.4% qualification rate</div>
+            <div style="font-size: 2.5rem; font-weight: 700; color: #1E293B;">{qualified_count}</div>
+            <div style="color: {'#10B981' if qualification_rate >= 50 else '#64748B'};">{qualification_rate:.1f}% qualification rate</div>
         </div>
         """, unsafe_allow_html=True)
         
     with col3:
-        st.markdown("""
+        st.markdown(f"""
         <div class="kpi-card">
-            <h3>Positions Filled</h3>
-            <div style="font-size: 2.5rem; font-weight: 700; color: #1E293B;">124</div>
-            <div style="color: #64748B;">14.6% hire rate</div>
+            <h3>Average Score</h3>
+            <div style="font-size: 2.5rem; font-weight: 700; color: #1E293B;">{avg_score:.2f}</div>
+            <div style="color: #64748B;">Top: {top_score:.2f}</div>
         </div>
         """, unsafe_allow_html=True)
     
     st.markdown("---")
     
-    # Charts
+    # Charts based on actual data
     chart_col1, chart_col2 = st.columns(2)
     
     with chart_col1:
-        st.subheader("Recruitment Pipeline Trend")
-        st.caption("Monthly applicant and qualification metrics")
-        # Dummy Data for visual match
-        df_trend = pd.DataFrame({
-            'Month': ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-            'Applicants': [120, 140, 160, 190, 215, 240],
-            'Qualified': [80, 95, 110, 125, 142, 155]
-        })
-        fig_trend = px.line(df_trend, x='Month', y=['Applicants', 'Qualified'], 
-                            color_discrete_sequence=['#334155', '#10B981'], markers=True)
-        fig_trend.update_layout(plot_bgcolor='white', paper_bgcolor='white', 
-                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-        st.plotly_chart(fig_trend, use_container_width=True)
+        st.subheader("Candidate Score Distribution")
+        st.caption("Score distribution from current ranking")
+        
+        if results_df is not None and len(results_df) > 0:
+            fig_hist = px.histogram(
+                results_df, x="Global Score", nbins=10,
+                color_discrete_sequence=['#334155']
+            )
+            fig_hist.update_layout(
+                plot_bgcolor='white', paper_bgcolor='white',
+                xaxis_title="Score", yaxis_title="Count"
+            )
+            st.plotly_chart(fig_hist, use_container_width=True)
+        else:
+            st.info("Run candidate rankings to see score distribution")
         
     with chart_col2:
-        st.subheader("Position Outcomes Distribution")
-        st.caption("Conversion metrics across pipeline stages")
-        df_bar = pd.DataFrame({
-            'Stage': ['Applied', 'Screened', 'Interviewed', 'Offer', 'Hired'],
-            'Count': [1256, 847, 420, 150, 124]
-        })
-        fig_bar = px.bar(df_bar, x='Stage', y='Count',
-                         color_discrete_sequence=['#0F766E']) # Teal
-        fig_bar.update_layout(plot_bgcolor='white', paper_bgcolor='white')
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.subheader("Semantic vs Risk Analysis")
+        st.caption("Candidate performance breakdown")
+        
+        if results_df is not None and len(results_df) > 0:
+            fig_scatter = px.scatter(
+                results_df, x="Semantic Match", y="Risk",
+                hover_data=["Candidate", "Global Score"],
+                color="Global Score",
+                color_continuous_scale="RdYlGn"
+            )
+            fig_scatter.update_layout(
+                plot_bgcolor='white', paper_bgcolor='white',
+                xaxis_title="Semantic Match Score", yaxis_title="Risk Score"
+            )
+            st.plotly_chart(fig_scatter, use_container_width=True)
+        else:
+            st.info("Run candidate rankings to see analysis")
+    
+    # Experience Distribution from actual resume data
+    if resumes_df is not None and "Experience (Years)" in resumes_df.columns:
+        st.markdown("---")
+        st.subheader("Applicant Pool Analysis")
+        
+        exp_col1, exp_col2 = st.columns(2)
+        
+        with exp_col1:
+            st.caption("Experience Distribution")
+            fig_exp = px.histogram(
+                resumes_df, x="Experience (Years)", nbins=8,
+                color_discrete_sequence=['#0F766E']
+            )
+            fig_exp.update_layout(plot_bgcolor='white', paper_bgcolor='white')
+            st.plotly_chart(fig_exp, use_container_width=True)
+        
+        with exp_col2:
+            st.caption("Top Skills in Pool")
+            if "Skills" in resumes_df.columns:
+                # Parse and count skills
+                all_skills = []
+                for skills in resumes_df["Skills"].dropna():
+                    all_skills.extend([s.strip() for s in str(skills).split(",")])
+                
+                skill_counts = pd.Series(all_skills).value_counts().head(8)
+                df_skills = pd.DataFrame({"Skill": skill_counts.index, "Count": skill_counts.values})
+                
+                fig_skills = px.bar(
+                    df_skills, x="Count", y="Skill", orientation='h',
+                    color_discrete_sequence=['#334155']
+                )
+                fig_skills.update_layout(plot_bgcolor='white', paper_bgcolor='white')
+                st.plotly_chart(fig_skills, use_container_width=True)
     
     # --- Fairness Metrics Section ---
     if "fairness" in novel_modules and st.session_state.get("results_df") is not None:
@@ -551,3 +631,4 @@ with tab3:
             with st.expander("📌 Recommendations", expanded=False):
                 for rec in report["recommendations"]:
                     st.warning(rec)
+
