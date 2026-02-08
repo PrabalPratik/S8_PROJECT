@@ -8,4 +8,11 @@ font = "sans serif"
 
 [server]
 headless = true
-enableCORS = false
+# Security: Enable CORS protection
+enableCORS = true
+# Security: Enable XSRF token protection
+enableXsrfProtection = true
+
+[browser]
+# Privacy: Disable usage statistics collection
+gatherUsageStats = false

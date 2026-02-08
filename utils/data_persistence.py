@@ -3,6 +3,8 @@ Data Persistence Module - Store JDs and Rankings
 
 Saves generated job descriptions and candidate rankings to CSV
 for persistence across sessions.
+
+Security: Path validation on initialization, data sanitization on write.
 """
 
 import os
@@ -11,6 +13,13 @@ import json
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 import pandas as pd
+
+# Security imports
+try:
+    from utils.security import InputSanitizer, get_path_validator
+    SECURITY_AVAILABLE = True
+except ImportError:
+    SECURITY_AVAILABLE = False
 
 
 class DataPersistence:
@@ -21,11 +30,29 @@ class DataPersistence:
     """
     
     def __init__(self, data_dir: str = "data"):
-        self.data_dir = data_dir
-        self.jd_log_path = os.path.join(data_dir, "generated_jds.csv")
-        self.rankings_log_path = os.path.join(data_dir, "ranking_history.csv")
+        # Validate data directory
+        self.data_dir = self._validate_data_dir(data_dir)
+        self.jd_log_path = os.path.join(self.data_dir, "generated_jds.csv")
+        self.rankings_log_path = os.path.join(self.data_dir, "ranking_history.csv")
         
         self._ensure_files_exist()
+    
+    def _validate_data_dir(self, data_dir: str) -> str:
+        """
+        Validate and normalize the data directory path.
+        
+        Security: Prevents path traversal attacks.
+        """
+        # Normalize path
+        normalized = os.path.normpath(data_dir)
+        
+        # Prevent traversal outside working directory
+        if '..' in normalized or normalized.startswith(os.sep):
+            # Use default safe directory
+            print(f"Warning: Invalid data_dir '{data_dir}', using 'data'")
+            normalized = 'data'
+        
+        return normalized
     
     def _ensure_files_exist(self) -> None:
         """Create log files with headers if they don't exist."""
@@ -67,15 +94,21 @@ class DataPersistence:
             True if saved successfully
         """
         try:
+            # Sanitize text data to prevent CSV injection
+            safe_role = self._sanitize_csv_field(role)
+            safe_mandatory = self._sanitize_csv_field(mandatory_skills)
+            safe_optional = self._sanitize_csv_field(optional_skills)
+            safe_jd = self._sanitize_csv_field(jd_text.replace('\n', '\\n'))
+            
             with open(self.jd_log_path, 'a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 writer.writerow([
                     datetime.now().isoformat(),
-                    role,
+                    safe_role,
                     experience,
-                    mandatory_skills,
-                    optional_skills,
-                    jd_text.replace('\n', '\\n'),  # Escape newlines
+                    safe_mandatory,
+                    safe_optional,
+                    safe_jd,
                     hri_score if hri_score else '',
                     drift_score if drift_score else ''
                 ])
@@ -83,6 +116,25 @@ class DataPersistence:
         except Exception as e:
             print(f"Failed to save JD: {e}")
             return False
+    
+    def _sanitize_csv_field(self, value: str) -> str:
+        """
+        Sanitize a field for CSV to prevent formula injection.
+        
+        Security: CSV injection attacks can execute formulas in spreadsheet apps.
+        """
+        if not value:
+            return ""
+        
+        value = str(value)
+        
+        # Prevent CSV formula injection
+        # Formulas start with =, +, -, @, or tab/carriage return
+        dangerous_prefixes = ('=', '+', '-', '@', '\t', '\r')
+        if value.startswith(dangerous_prefixes):
+            value = "'" + value  # Prefix with quote to escape
+        
+        return value
     
     def save_rankings(
         self,

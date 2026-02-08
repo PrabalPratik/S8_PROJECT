@@ -3,11 +3,14 @@ Feedback Logger - Human-Grounded Evaluation
 
 Collects and stores human feedback on JD quality and ranking accuracy
 to enable human-grounded evaluation of the AI system.
+
+Security: Path validation and data sanitization to prevent injection.
 """
 
 import os
 import csv
 import json
+import html
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import pandas as pd
@@ -30,8 +33,24 @@ class FeedbackLogger:
         Args:
             log_path: Path to CSV file for storing feedback
         """
-        self.log_path = log_path
+        self.log_path = self._validate_log_path(log_path)
         self._ensure_log_exists()
+    
+    def _validate_log_path(self, log_path: str) -> str:
+        """
+        Validate and normalize the log file path.
+        
+        Security: Prevents path traversal attacks.
+        """
+        # Normalize path
+        normalized = os.path.normpath(log_path)
+        
+        # Prevent absolute paths or traversal
+        if os.path.isabs(normalized) or '..' in normalized:
+            print(f"Warning: Invalid log_path '{log_path}', using default")
+            normalized = os.path.join('data', 'feedback_log.csv')
+        
+        return normalized
     
     def _ensure_log_exists(self) -> None:
         """Create log file with headers if it doesn't exist."""
@@ -77,23 +96,50 @@ class FeedbackLogger:
             context = {}
         
         try:
+            # Sanitize all string fields to prevent injection
+            safe_role = self._sanitize_field(context.get('role', ''))
+            safe_skills = self._sanitize_field(context.get('skills', ''))
+            safe_candidate = self._sanitize_field(context.get('candidate', ''))
+            safe_notes = self._sanitize_field(notes)
+            
             with open(self.log_path, 'a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 writer.writerow([
                     datetime.now().isoformat(),
                     feedback_type,
                     rating,
-                    context.get('role', ''),
-                    context.get('skills', ''),
-                    context.get('candidate', ''),
+                    safe_role,
+                    safe_skills,
+                    safe_candidate,
                     context.get('hri_score', ''),
                     context.get('drift_score', ''),
-                    notes
+                    safe_notes
                 ])
             return True
         except Exception as e:
             print(f"Feedback logging failed: {e}")
             return False
+    
+    def _sanitize_field(self, value: str) -> str:
+        """
+        Sanitize a field for safe CSV storage.
+        
+        Security: Prevents CSV formula injection and XSS if displayed.
+        """
+        if not value:
+            return ""
+        
+        value = str(value)
+        
+        # Escape HTML entities
+        value = html.escape(value)
+        
+        # Prevent CSV formula injection
+        dangerous_prefixes = ('=', '+', '-', '@', '\t', '\r')
+        if value.startswith(dangerous_prefixes):
+            value = "'" + value
+        
+        return value
     
     def get_feedback_summary(self) -> Dict[str, Any]:
         """

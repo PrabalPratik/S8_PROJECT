@@ -11,6 +11,13 @@ import plotly.graph_objects as go
 import plotly.express as px
 import numpy as np
 
+# Security imports
+from utils.security import (
+    InputSanitizer,
+    get_rate_limiter,
+    escape_html
+)
+
 # Import Novel Features
 try:
     from utils.hallucination_detector import HallucinationDetector
@@ -187,22 +194,46 @@ with tab1:
     with col_input:
         st.subheader("Job Description Generator")
         with st.container(border=True):
-            role = st.text_input("Target Role", "Senior Backend Engineer")
+            role_input = st.text_input("Target Role", "Senior Backend Engineer", max_chars=100)
             exp = st.slider("Experience Required", 0, 15, 8, format="%d years")
             
             st.write("")
-            mandatory = st.text_area("Mandatory Skills", "Python, Django, AWS", height=100)
-            optional = st.text_input("Optional Skills", "Kubernetes, PostgreSQL")
+            mandatory_input = st.text_area("Mandatory Skills", "Python, Django, AWS", height=100, max_chars=500)
+            optional_input = st.text_input("Optional Skills", "Kubernetes, PostgreSQL", max_chars=300)
+            
+            # Sanitize inputs
+            role, role_valid = InputSanitizer.sanitize_role(role_input)
+            mandatory, mandatory_valid = InputSanitizer.sanitize_skills(mandatory_input)
+            optional, _ = InputSanitizer.sanitize_skills(optional_input)
+            
+            # Show validation warnings
+            if role_input and not role_valid:
+                st.warning("⚠️ Role name contains invalid characters")
+            if mandatory_input and not mandatory_valid:
+                st.warning("⚠️ Some skills contain invalid characters")
             
             st.write("")
             if st.button("Generate Job Description", type="primary", use_container_width=True):
-                with st.spinner("Synthesizing..."):
-                    time.sleep(0.5)
-                    jd_text = t5_model.generate(role, mandatory, optional, exp)
-                    st.session_state["jd_text"] = jd_text
-                    st.session_state["generated_role"] = role
-                    st.session_state["mandatory"] = mandatory
-                    st.session_state["exp"] = exp
+                # Rate limiting check
+                rate_limiter = get_rate_limiter()
+                session_key = f"jd_gen_{st.session_state.get('session_id', 'default')}"
+                allowed, remaining = rate_limiter.check_rate_limit(session_key, max_requests=10, window_seconds=60)
+                
+                if not allowed:
+                    wait_time = rate_limiter.get_wait_time(session_key)
+                    st.error(f"⏳ Rate limit reached. Please wait {wait_time} seconds.")
+                elif not role_valid:
+                    st.error("Please enter a valid role name.")
+                elif not mandatory:
+                    st.error("Please enter at least one mandatory skill.")
+                else:
+                    with st.spinner("Synthesizing..."):
+                        time.sleep(0.5)
+                        jd_text = t5_model.generate(role, mandatory, optional, exp)
+                        st.session_state["jd_text"] = jd_text
+                        st.session_state["generated_role"] = role
+                        st.session_state["mandatory"] = mandatory
+                        st.session_state["exp"] = exp
                     
                     # Run novel feature analysis
                     if show_hri and "hri" in novel_modules:
@@ -378,8 +409,18 @@ with tab2:
                             skill_weights[skill] = weight
 
                     for idx, row in resumes_df.iterrows():
-                        resume_text = f"Skills: {row['Skills']}. Experience: {row['Experience (Years)']} years."
-                        gap = max(0, st.session_state.get("exp", 5) - row['Experience (Years)'])
+                        # Use Resume_str if available (new processed dataset), else fallback to old format
+                        if 'Resume_str' in resumes_df.columns:
+                            resume_text = row['Resume_str'][:2000]  # Truncate for BERT max length
+                            # Extract experience heuristically (look for "X years" pattern)
+                            import re
+                            exp_match = re.search(r'(\d+)\s*(?:years?|yrs?)', str(resume_text).lower())
+                            candidate_exp = int(exp_match.group(1)) if exp_match else 3  # Default 3 years
+                        else:
+                            resume_text = f"Skills: {row.get('Skills', '')}. Experience: {row.get('Experience (Years)', 3)} years."
+                            candidate_exp = row.get('Experience (Years)', 3)
+                        
+                        gap = max(0, st.session_state.get("exp", 5) - candidate_exp)
                         
                         score, info = bert_model.get_research_score(
                             resume_text, st.session_state["jd_text"], 
@@ -387,7 +428,7 @@ with tab2:
                             skill_rarity_weights=skill_weights
                         )
                         results.append({
-                            "Candidate": row.get("Name", f"Candidate {idx}"),
+                            "Candidate": row.get("Candidate", row.get("Name", f"Candidate {idx}")),
                             "Global Score": score,
                             "Semantic Match": info["sim"],
                             "Risk": info["pen_miss"]
@@ -485,24 +526,33 @@ with tab3:
             "rankings_run": 0
         }
     
-    # KPI Cards - Dynamic Data
+    # KPI Cards - Dynamic Data (values are computed, not user-input, so safe for display)
     col1, col2, col3 = st.columns(3)
+    
+    # Note: These values are derived from internal computations, not raw user input
+    # Safe to display in HTML as they are numeric/computed values
+    safe_total = escape_html(str(total_applicants))
+    safe_qualified = escape_html(str(qualified_count))
+    safe_rate = escape_html(f"{qualification_rate:.1f}")
+    safe_avg = escape_html(f"{avg_score:.2f}")
+    safe_top = escape_html(f"{top_score:.2f}")
     
     with col1:
         st.markdown(f"""
         <div class="kpi-card">
             <h3>Total Applicants</h3>
-            <div style="font-size: 2.5rem; font-weight: 700; color: #1E293B;">{total_applicants}</div>
+            <div style="font-size: 2.5rem; font-weight: 700; color: #1E293B;">{safe_total}</div>
             <div style="color: #64748B;">From resumes.csv</div>
         </div>
         """, unsafe_allow_html=True)
         
     with col2:
+        rate_color = '#10B981' if qualification_rate >= 50 else '#64748B'
         st.markdown(f"""
         <div class="kpi-card">
             <h3>Qualified Candidates</h3>
-            <div style="font-size: 2.5rem; font-weight: 700; color: #1E293B;">{qualified_count}</div>
-            <div style="color: {'#10B981' if qualification_rate >= 50 else '#64748B'};">{qualification_rate:.1f}% qualification rate</div>
+            <div style="font-size: 2.5rem; font-weight: 700; color: #1E293B;">{safe_qualified}</div>
+            <div style="color: {rate_color};">{safe_rate}% qualification rate</div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -510,8 +560,8 @@ with tab3:
         st.markdown(f"""
         <div class="kpi-card">
             <h3>Average Score</h3>
-            <div style="font-size: 2.5rem; font-weight: 700; color: #1E293B;">{avg_score:.2f}</div>
-            <div style="color: #64748B;">Top: {top_score:.2f}</div>
+            <div style="font-size: 2.5rem; font-weight: 700; color: #1E293B;">{safe_avg}</div>
+            <div style="color: #64748B;">Top: {safe_top}</div>
         </div>
         """, unsafe_allow_html=True)
     
