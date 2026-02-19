@@ -28,6 +28,9 @@ try:
     from models.constraint_graph import ConstraintCoverageGraph
     from utils.feedback_logger import get_feedback_logger
     from utils.data_persistence import get_data_persistence
+    # New modules
+    from utils.screening import ScreeningEngine
+    from models.question_generator import QuestionGenerator
     NOVEL_FEATURES_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Some novel features unavailable: {e}")
@@ -114,6 +117,16 @@ def load_novel_features():
                 modules["fairness"] = FairnessAuditor(dir_threshold=FAIRNESS_THRESHOLD)
             except Exception as e:
                 print(f"Fairness auditor init failed: {e}")
+            except Exception as e:
+                print(f"Fairness auditor init failed: {e}")
+        
+        # Initialize Screening & Questions (Always enabled if available)
+        try:
+            modules["screening"] = ScreeningEngine()
+            modules["questions"] = QuestionGenerator()
+        except Exception as e:
+            print(f"Screening/Questions init failed: {e}")
+
     return modules
 
 with st.spinner("Initializing Research Engine..."):
@@ -160,6 +173,7 @@ with st.sidebar:
     show_drift = st.checkbox("Show Drift Detection", value=DRIFT_ENABLED and "drift" in novel_modules)
     show_stability = st.checkbox("Show Rank Stability", value=SENSITIVITY_ENABLED and "sensitivity" in novel_modules)
     use_srw = st.checkbox("Use Skill Rarity Weighting", value=SRW_ENABLED and "srw" in novel_modules)
+    use_banding = st.checkbox("Enable Smart Screening Bands", value=True)
 
 
 # --- Main Interface ---
@@ -431,7 +445,11 @@ with tab2:
                             "Candidate": row.get("Candidate", row.get("Name", f"Candidate {idx}")),
                             "Global Score": score,
                             "Semantic Match": info["sim"],
-                            "Risk": info["pen_miss"]
+                            "Risk": info["pen_miss"],
+                            "Missing Skills": info["missing_skills"],
+                            "Experience Gap": info["pen_exp"],
+                            "Resume Text": resume_text,
+                            "Exp Years": candidate_exp
                         })
                     
                     results_df = pd.DataFrame(results).sort_values(by="Global Score", ascending=False)
@@ -448,14 +466,33 @@ with tab2:
                     except Exception as e:
                         print(f"Rankings persistence failed: {e}")
                     
-                    # Display Table
-                    st.dataframe(
-                        results_df,
-                        column_config={
-                            "Global Score": st.column_config.ProgressColumn("Score", format="%.2f", min_value=0, max_value=0.5),
-                        },
-                        use_container_width=True, hide_index=True
-                    )
+                    
+                    # --- Smart Screening: Selected / Rejected View ---
+                    if use_banding and "screening" in novel_modules:
+                        sorted_results = results_df.to_dict('records')
+                        grouped = novel_modules["screening"].group_candidates(sorted_results)
+                        
+                        # Split into Selected (Prime + Contender) and Rejected (Potential + Mismatch)
+                        selected = grouped.get("Prime", []) + grouped.get("Contender", [])
+                        rejected = grouped.get("Potential", []) + grouped.get("Mismatch", [])
+                        
+                        # Sort each group high → low
+                        selected.sort(key=lambda x: x["Global Score"], reverse=True)
+                        rejected.sort(key=lambda x: x["Global Score"], reverse=True)
+                        
+                        # Store for View Report (outside spinner)
+                        st.session_state["screening_selected"] = selected
+                        st.session_state["screening_rejected"] = rejected
+
+                    else:
+                        # Fallback to original Table View
+                        st.dataframe(
+                            results_df,
+                            column_config={
+                                "Global Score": st.column_config.ProgressColumn("Score", format="%.2f", min_value=0, max_value=0.5),
+                            },
+                            use_container_width=True, hide_index=True
+                        )
 
                     
                     # Feedback for rankings
@@ -489,6 +526,120 @@ with tab2:
                     
                 except Exception as e:
                     st.error(f"Analysis failed: {e}")
+
+    # --- Persistent Screening Display (renders even without re-clicking Generate) ---
+    if use_banding and "screening_selected" in st.session_state:
+        selected = st.session_state["screening_selected"]
+        rejected = st.session_state["screening_rejected"]
+        
+        st.markdown("---")
+        st.markdown("### 🎯 Smart Screening Results")
+        st.caption(f"**{len(selected)}** shortlisted  •  **{len(rejected)}** not shortlisted  •  Sorted highest → lowest")
+        
+        # --- ✅ SELECTED CANDIDATES ---
+        st.markdown("#### ✅ Shortlisted for Interview")
+        if selected:
+            for cand in selected:
+                c1, c2, c3 = st.columns([4, 1, 1])
+                with c1:
+                    band = cand.get("band_info", {}).get("band", "")
+                    st.markdown(f"🟢 **{cand['Candidate']}** — *{band}*")
+                    st.caption(f"Score: {cand['Global Score']:.2f} | Semantic: {cand['Semantic Match']:.2f}")
+                with c2:
+                    st.markdown(f"**{cand['Global Score']:.0%}**")
+                with c3:
+                    if st.button("📄 View Report", key=f"sel_{cand['Candidate']}"):
+                        st.session_state["selected_candidate"] = cand
+                        st.rerun()
+                st.divider()
+        else:
+            st.info("No candidates met the shortlist threshold for this role.")
+        
+        # --- ❌ REJECTED CANDIDATES ---
+        st.markdown("#### ❌ Not Shortlisted")
+        if rejected:
+            for cand in rejected:
+                c1, c2, c3 = st.columns([4, 1, 1])
+                with c1:
+                    band = cand.get("band_info", {}).get("band", "")
+                    st.markdown(f"🔴 **{cand['Candidate']}** — *{band}*")
+                    st.caption(f"Score: {cand['Global Score']:.2f} | Semantic: {cand['Semantic Match']:.2f}")
+                with c2:
+                    st.markdown(f"**{cand['Global Score']:.0%}**")
+                with c3:
+                    if st.button("📄 View Report", key=f"rej_{cand['Candidate']}"):
+                        st.session_state["selected_candidate"] = cand
+                        st.rerun()
+                st.divider()
+
+    # --- VIEW REPORT PANEL ---
+    if "selected_candidate" in st.session_state:
+        sel = st.session_state["selected_candidate"]
+        st.markdown("---")
+        
+        # Header with status
+        band = sel.get("band_info", {}).get("band", "Unknown")
+        if band in ["Prime", "Contender"]:
+            st.success(f"### ✅ Candidate Report: {sel['Candidate']}  —  SHORTLISTED ({band})")
+        else:
+            st.error(f"### ❌ Candidate Report: {sel['Candidate']}  —  NOT SHORTLISTED ({band})")
+        
+        # Score Breakdown
+        col_s1, col_s2, col_s3 = st.columns(3)
+        col_s1.metric("Semantic Match", f"{sel['Semantic Match']:.0%}")
+        col_s2.metric("Skill Penalty", f"{sel['Risk']:.0%}", delta_color="inverse")
+        col_s3.metric("Experience Gap", f"{sel['Experience Gap']:.0%}", delta_color="inverse")
+        
+        # Feedback
+        if "screening" in novel_modules:
+            feedback = novel_modules["screening"].generate_feedback(
+                {
+                    "semantic_score": sel["Semantic Match"],
+                    "missing_skills": sel.get("Missing Skills", []),
+                    "exp_years": sel.get("Exp Years", 0),
+                    "Global Score": sel["Global Score"]
+                },
+                {
+                    "mandatory_skills": st.session_state.get("mandatory", "").split(","),
+                    "min_exp": st.session_state.get("exp", 0)
+                }
+            )
+            st.info(feedback)
+        
+        # Missing Skills
+        missing = sel.get("Missing Skills", [])
+        if missing:
+            st.warning(f"**Missing Mandatory Skills:** {', '.join(missing)}")
+        else:
+            st.success("**All mandatory skills matched.**")
+        
+        # Interview Questions
+        if "questions" in novel_modules:
+            st.markdown("**🎤 Suggested Interview Questions:**")
+            import re
+            projects = []
+            proj_matches = re.findall(r'(?:Project|System):\s*([A-Za-z0-9 ]+)', sel.get("Resume Text", ""), re.IGNORECASE)
+            if proj_matches:
+                for p in proj_matches[:2]:
+                    projects.append({"name": p.strip(), "tech": []})
+            else:
+                projects.append({"name": "Recent Work", "tech": []})
+
+            questions = novel_modules["questions"].generate_questions({
+                "projects": projects,
+                "experience_years": sel.get("Exp Years", 0),
+                "skills": st.session_state.get("mandatory", "").split(",")
+            })
+            for i, q in enumerate(questions, 1):
+                st.markdown(f"**Q{i}.** {q}")
+        
+        # Resume Preview
+        with st.expander("📃 Resume Preview", expanded=False):
+            st.text(sel.get("Resume Text", "No resume text available.")[:1500])
+        
+        if st.button("✖ Close Report", type="primary"):
+            del st.session_state["selected_candidate"]
+            st.rerun()
 
 # --- TAB 3: ANALYTICS ---
 with tab3:
